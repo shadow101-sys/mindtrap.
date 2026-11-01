@@ -1,62 +1,47 @@
-# MINDTRAP — Find the Impostor
+# MINDTRAP
 
-A small-room online social deduction game built with Node.js, Express, Socket.IO, and browser WebRTC.
-
-## Requirements
-- Node.js 18 or newer
-- A modern browser
-- At least 3 players to start a room
-- Microphone permission for voice chat
+A multiplayer word-and-deduction game built with Node.js, Express, Socket.IO, and WebRTC.
 
 ## Run locally
-1. Extract the project.
-2. Open a terminal inside the `guess-the-impostor` folder.
-3. Run `npm install`.
-4. Run `npm start`.
-5. Open `http://localhost:3000`.
-6. Open the same URL in other browsers or devices to test multiplayer.
 
-Do not use VS Code Live Server for multiplayer testing. Live Server only previews the static front end; `npm start` runs the actual Socket.IO game server and server-controlled timers.
+1. Install Node.js 18 or newer.
+2. From this folder, run `npm install` and then `npm start`.
+3. Open `http://localhost:3000` in a modern browser.
+4. Create a room and share its six-character code.
 
-## Game flow
-1. The host starts the game.
-2. The server privately selects a random word-setter who is guaranteed to be a regular player.
-3. The selected player types a secret word. This step has **no timer**.
-4. Regular players receive the word privately; impostors receive no word.
-5. The host begins the clue phase. Speaking order is shuffled and each player gets **20 seconds**. If a turn expires, the server records a missed turn and advances automatically.
-6. Discussion lasts **60 seconds**. The host can start voting early; otherwise voting starts automatically.
-7. Voting lasts **30 seconds** and resolves automatically, even if someone does not vote.
-8. After results, the host starts a vote for the next word-setter. A tie is broken randomly; if no one votes, the server chooses a random active player.
-9. The elected next word-setter is guaranteed not to be an impostor in the next round.
+Use the Node server for multiplayer; VS Code Live Server does not run Socket.IO.
 
-The current word-setter's identity is not included in public room updates. Eliminated players remain in the room and can still use chat and voice.
+## How a match works
 
-## Current features
-- Create and join rooms with a six-character code
-- Host settings for player limit and impostor count
-- Server-side random impostor assignment
-- Private role and secret-word delivery
-- Hidden current word-setter identity
-- 20-second server-controlled clue turns with animated client timer
-- 60-second discussion timer and automatic transition to voting
-- 30-second voting timer and automatic resolution
-- Next word-setter vote and next-round protection
-- Live room chat with a short in-memory history
-- WebRTC microphone voice for small rooms
-- Animated lobby mascot, character avatars, timer effects, responsive layout
-- Optional user-supplied music and sound-effect file slots
+1. The host chooses the player limit, Impostor count, and whether to include a Shadow.
+2. The server assigns roles and privately chooses a non-Impostor word setter.
+3. Innocents and the Shadow see the secret word. Impostors do not.
+4. Every connected player marks ready. The clue phase opens when everyone is ready.
+5. Each connected player writes and locks one clue. Clues stay hidden until every connected player submits.
+6. Discuss the revealed clues and vote for another active player. Votes and voter identities stay private until all connected players have voted.
+7. Results reveal the vote choices and the eliminated player's role. If the match continues, the next clue round begins automatically with the same word and roles.
+8. A new match resets the roles and selects a new word.
 
-## Voice chat notes
-Voice uses a peer-to-peer WebRTC mesh. Every player must click **Enable mic** and allow browser microphone access. STUN servers are included, but STUN alone cannot connect every network. For better reliability, configure a TURN server using the environment variables described in `RENDER-SETUP.md`. TURN credentials are delivered to players' browsers, so use short-lived/limited credentials, never an administrator password. The mesh is intended for small friend groups, not large public rooms.
+There are no gameplay countdowns. A player's local chat and voice controls do not affect other players.
 
-## Audio files
-Read `public/assets/audio/README.txt` for the audio filenames and controls. Add only music and effects that you own or have permission to publish.
+## Roles and wins
 
-## Planned camera + secret-sound feature
-The camera and impostor-excluded sound feature is not enabled in this build. See `FUTURE-CAMERA-SECRET-AUDIO.md` for the planned approach and the exact locations for the future code.
+- **Innocent:** knows the word; wins with the Innocents when every Impostor is eliminated.
+- **Impostor:** does not know the word; wins when Impostors equal or outnumber all other living players, including the Shadow.
+- **Shadow (optional):** knows the word and wins alone if uniquely receiving the most votes and being eliminated.
 
-## Prototype limitations
-- Room state and chat history are kept in memory. Restarting or sleeping/restarting the server clears rooms.
-- There is no account system or robust reconnection/session restoration. A disconnected player must rejoin a lobby.
-- Voice mesh uses one peer connection per pair, so keep rooms small. A TURN service is recommended for broader network compatibility; an SFU is preferable for larger rooms.
-- This is a prototype. Add persistent storage, abuse/rate limiting, stronger reconnection handling, and production monitoring before making it a large public game.
+A tied vote eliminates nobody. The Shadow cannot also be an Impostor.
+
+## Voice, chat, and reconnecting
+
+Chat works in the lobby and during a match. To talk, each player must click **Enable mic** and grant browser permission. The host can remove offline players; players who disconnect can rejoin from the same browser using their saved room session. Voice uses a peer-to-peer WebRTC mesh for small rooms. STUN is configured by default; set `TURN_URLS`, `TURN_USERNAME`, and `TURN_CREDENTIAL` for a TURN service on Render.
+
+Rooms are stored in server memory and disappear when the server restarts. Keep rooms small; use an SFU for larger games.
+
+## Deployment
+
+The GitHub repository contains this project in `guess-the-impostor`. In Render, set the Root Directory to `guess-the-impostor`, Build Command to `npm install`, and Start Command to `npm start`. The server exposes `/health` for health checks. See [RENDER-SETUP.md](./RENDER-SETUP.md) for voice configuration.
+
+## Audio
+
+See [public/assets/audio/README.txt](./public/assets/audio/README.txt) for the available music and sound-effect files.
