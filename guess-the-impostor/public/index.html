@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Guess the Impostor</title>
+  <title>MINDTRAP — Find the Impostor</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
@@ -12,7 +12,7 @@
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
   <header class="topbar">
     <a class="brand" href="#"><span class="brand-icon">◈</span> MIND<span>TRAP</span></a>
-    <div class="top-right"><span class="live-dot"></span><span id="connection-label">ONLINE PARTY GAME</span><button id="sound-toggle" class="icon-button" title="Toggle sound effects">♫</button></div>
+    <div class="top-right"><span class="live-dot"></span><span id="connection-label">ONLINE PARTY GAME</span><button id="sfx-toggle" class="icon-button" title="Mute sound effects" aria-pressed="true">Mute SFX</button><button id="music-toggle" class="icon-button" title="Play your optional background music">Music: off</button></div>
   </header>
 
   <main>
@@ -46,13 +46,17 @@
 
     <section id="lobby-screen" class="screen">
       <div class="section-heading"><span class="eyebrow">THE HANGOUT</span><h2>Room <span id="room-code-title" class="code-glow">------</span></h2><p>Invite your friends, then get suspicious.</p></div>
+      <div class="lobby-banner">
+        <div class="lobby-copy"><span class="eyebrow">YOUR CREW IS HERE</span><h3>One room. One secret.<br><span>Too many suspects.</span></h3><p>Share the code, check your mic, and start when three or more players are ready.</p></div>
+        <div class="chubby-mascot" aria-label="A small animated game mascot"><div class="mascot-ear left"></div><div class="mascot-ear right"></div><div class="mascot-body"><span class="mascot-eye eye-left"></span><span class="mascot-eye eye-right"></span><span class="mascot-mouth"></span><span class="mascot-blush blush-left"></span><span class="mascot-blush blush-right"></span></div><span class="mascot-shadow"></span><span class="mascot-spark spark-a">✦</span><span class="mascot-spark spark-b">?</span></div>
+      </div>
       <div class="lobby-grid">
         <div class="panel players-panel"><div class="panel-head"><h3>Players <span id="player-count" class="count-pill">1/8</span></h3><span class="subtle">LOBBY</span></div><div id="lobby-players" class="player-grid"></div>
           <div class="invite-row"><div><small>ROOM CODE</small><strong id="room-code-copy">------</strong></div><button id="copy-code" class="secondary-button small">Copy code</button></div>
         </div>
         <div class="panel settings-panel"><div class="panel-head"><h3>Game settings</h3><span class="subtle">HOST ONLY</span></div>
           <label>PLAYER LIMIT<select id="max-players"><option>4</option><option selected>8</option><option>10</option><option>12</option><option>15</option></select></label>
-          <label>IMPOSTORS<select id="impostor-count"><option value="1">1 impostor</option><option value="2">2 impostors</option><option value="3">3 impostors</option></select></label>
+          <label>IMPOSTORS<select id="impostor-count"><option value="1">1 impostor</option><option value="2">2 impostors</option><option value="3">3 impostors</option><option value="4">4 impostors</option></select></label>
           <div class="note-box">✦ Minimum 3 players to start. Keep your word secret.</div>
           <button id="start-game" class="primary-button full">Start game <span>→</span></button>
           <button id="leave-room" class="text-button">Leave room</button>
@@ -65,6 +69,7 @@
       <div class="game-layout">
         <div class="main-game-column">
           <div class="panel game-panel">
+            <div id="phase-timer" class="phase-timer hidden"><div class="timer-heading"><span id="timer-label">TIME LEFT</span><strong id="timer-countdown">00:20</strong></div><div class="timer-track"><i id="timer-fill"></i></div></div>
             <div id="reveal-panel" class="phase-panel">
               <div class="eyebrow">YOUR SECRET IS WAITING</div>
               <h2>Know your role.</h2><p>Make sure nobody is peeking at your screen.</p>
@@ -107,6 +112,7 @@
               <div class="eyebrow">SECRET WORD SETTER</div><h2>Choose the secret word.</h2>
               <p id="word-entry-copy">Only the selected innocent player can submit the word.</p>
               <div id="word-entry-form" class="clue-form"><input id="word-entry-input" maxlength="40" placeholder="Type a word..." autocomplete="off"><button id="submit-word" class="primary-button">Set word</button></div>
+              <button id="reassign-word-setter" class="secondary-button small hidden">Choose another setter</button>
               <p class="host-hint" id="word-entry-hint">Waiting for the selected player to choose a word.</p>
             </div>
             <div id="picker-results-panel" class="phase-panel hidden">
@@ -115,11 +121,11 @@
               <p class="host-hint" id="picker-host-hint">Only the host can start the next round.</p>
             </div>
           </div>
-          <div class="voice-panel panel"><div class="voice-status"><span class="mic-orb">♫</span><div><strong>Room voice</strong><small id="voice-status">Voice chat ready — allow microphone access</small></div></div><button id="mic-toggle" class="secondary-button small">Enable mic</button></div>
+          <div class="voice-panel panel"><div class="voice-status"><span class="mic-orb">●</span><div><strong>Room voice</strong><small id="voice-status">Enable your mic to talk with everyone.</small></div></div><button id="mic-toggle" class="secondary-button small">Enable mic</button></div>
         </div>
         <aside class="side-column">
           <div class="panel roster-panel"><div class="panel-head"><h3>In the room</h3><span class="live-dot"></span></div><div id="game-roster" class="roster-list"></div></div>
-          <div class="panel chat-panel"><div class="panel-head"><h3>Room chat</h3><span class="subtle">LIVE</span></div><div id="chat-messages" class="chat-messages"><div class="system-message">Welcome to the room. Keep it friendly.</div></div><form id="chat-form" class="chat-form"><input id="chat-input" maxlength="300" placeholder="Send a message..." autocomplete="off"><button aria-label="Send message">➤</button></form></div>
+          <div id="chat-panel" class="panel chat-panel"><div class="panel-head"><h3>Room chat</h3><div class="chat-controls"><span class="subtle">LIVE</span><button id="chat-toggle" class="secondary-button small" type="button" aria-controls="chat-messages chat-form" aria-expanded="true">Hide chat</button></div></div><div id="chat-messages" class="chat-messages"><div class="system-message">Welcome to the room. Keep it friendly.</div></div><form id="chat-form" class="chat-form"><input id="chat-input" maxlength="300" placeholder="Send a message..." autocomplete="off"><button aria-label="Send message">➤</button></form></div>
         </aside>
       </div>
     </section>
@@ -127,6 +133,6 @@
   <div id="modal" class="modal hidden"><div class="modal-card"><button id="close-modal" class="modal-close">×</button><div id="modal-content"></div></div></div>
   <div id="toast" class="toast"></div>
   <footer><span>◈ MINDTRAP</span><span>MADE FOR FRIENDS. BUILT ON SUSPICION.</span></footer>
-  <script src="/socket.io/socket.io.js"></script><script src="app.js"></script>
+  <script src="/socket.io/socket.io.js"></script><script src="/runtime-config.js"></script><script src="app.js"></script>
 </body>
 </html>
