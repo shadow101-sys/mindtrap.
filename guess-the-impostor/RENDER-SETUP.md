@@ -1,45 +1,57 @@
 # MINDTRAP deployment notes (GitHub + Render)
 
-## Repository layout
-
-The GitHub repository root contains the `guess-the-impostor` folder. In Render, set:
+## Render settings
 
 - Service type: **Web Service**
 - Runtime: **Node**
-- Branch: `main`
-- Root Directory: `guess-the-impostor`
+- Branch: your deployment branch (commonly `main`)
+- Root Directory: the folder containing this project's `package.json` (for a nested repository, `guess-the-impostor`)
 - Build Command: `npm install`
 - Start Command: `npm start`
-- Health check path (optional): `/health`
+- Health check path: `/health`
 
-The service listens on `0.0.0.0` and uses Render's `PORT` environment variable.
+The server listens on `0.0.0.0` and uses Render's `PORT` environment variable.
 
-## Voice chat
+## Allowed origins
 
-The game uses peer-to-peer WebRTC audio. Both players must allow microphone access and click **Enable mic**. It uses public Google STUN servers by default, which works on some networks but is not reliable behind every router, mobile carrier, school network, or strict firewall.
+The server accepts same-origin browser requests and the local development origins `http://localhost:3000` and `http://127.0.0.1:3000`. When hosting the client separately from the server, set `ALLOWED_ORIGINS` to a comma-separated list of exact trusted origins, including their scheme, for example:
 
-For more reliable voice, configure a TURN service and add these Render environment variables:
+```text
+https://your-game.example,https://www.your-game.example
+```
+
+Do not use a wildcard for a public deployment.
+
+## Voice chat / TURN
+
+The game uses peer-to-peer WebRTC audio for small rooms. Each player must click the microphone control and grant browser permission. Muting your own microphone disables your outgoing audio track but keeps the peer connections open for listening. Players can also mute another player's incoming audio locally.
+
+Google STUN servers are configured by default. STUN alone is not reliable on every router, mobile carrier, school network, or strict firewall. For more reliable connectivity, configure a TURN service with these environment variables:
 
 - `TURN_URLS`: comma-separated TURN URLs, e.g. `turn:turn.example.com:3478,turns:turn.example.com:5349`
 - `TURN_USERNAME`: TURN username
-- `TURN_CREDENTIAL`: TURN password/credential
+- `TURN_CREDENTIAL`: TURN credential
 
-Use a reputable TURN provider or your own secured coturn server. Important: WebRTC clients must receive TURN credentials, so the `/runtime-config.js` response makes the configured username and credential visible to players using the site. Use short-lived, limited TURN credentials from a provider or token-based TURN service; never expose an administrator password or a permanent high-privilege credential. Do not commit credentials to GitHub. For large rooms, a WebRTC SFU is more scalable than a full mesh. This project is designed for small friend groups.
+The `/runtime-config.js` endpoint sends the ICE server configuration to browsers. TURN credentials are therefore visible to users of the game. Use short-lived, restricted credentials from a TURN provider or token-based TURN service. Never expose an administrator password or permanent high-privilege credential, and do not commit secrets to GitHub.
 
-## Local test
+A full mesh creates a peer connection for each pair of players. For larger rooms, use a WebRTC SFU. This project is intended for small friend groups.
 
-From inside the `guess-the-impostor` folder:
+## Local testing
+
+From this project folder:
 
 ```bash
 npm install
+npm run check
+npm test
 npm start
 ```
 
-Open `http://localhost:3000`. Open the site in multiple browsers/devices to test the room. Microphone permission works on `localhost`; deployed mic access requires HTTPS (Render supplies HTTPS on its public URL).
+Open `http://localhost:3000` in several browsers or devices. Browser microphone permission works on `localhost`; deployed microphone access requires HTTPS, which Render provides on its public URL. VS Code Live Server does not run the Socket.IO backend and must not be used for multiplayer testing.
 
-## Updating after code changes
+## Updating the deployment
 
-From the repository root (the folder containing `.git`):
+From the Git repository root:
 
 ```bash
 git add .
@@ -47,11 +59,11 @@ git commit -m "Update MINDTRAP"
 git push
 ```
 
-Render can auto-deploy after the push if Auto-Deploy is enabled.
+Render can redeploy automatically after the push if Auto-Deploy is enabled.
 
-## Notes
+## Runtime limitations
 
-- Rooms and chat history live in server memory and are erased if the Render instance restarts or sleeps.
-- Render Free instances can sleep while idle; the first visit after sleeping may take time to wake.
-- This is a small-room prototype, not hardened for public competitive play. It has no persistent database, account system, or reconnect/session restoration.
-- Do not use Live Server to test multiplayer. Run `npm start` so Socket.IO and server timers are active.
+- Rooms, chat history, game state, and rejoin sessions are stored in server memory. A reconnect works while the same process and room remain alive, but a server restart clears them.
+- Rooms are cleaned up ten minutes after every player has disconnected.
+- There is no persistent database or account system.
+- `FUTURE-CAMERA-SECRET-AUDIO.md` documents ideas that are not implemented in this build.

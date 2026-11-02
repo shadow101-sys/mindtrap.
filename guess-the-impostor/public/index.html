@@ -3,137 +3,193 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#111318">
-  <title>MINDTRAP — Find the Impostor</title>
+  <meta name="theme-color" content="#0b1020">
+  <meta name="description" content="MINDTRAP is a multiplayer hidden-role word game. Share a room, leave clues, and find the Impostor.">
+  <title>MINDTRAP — Trust No Clue</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+
   <header class="topbar">
-    <a class="brand" href="#" aria-label="MINDTRAP home">MINDTRAP</a>
+    <a class="brand" href="#" aria-label="MINDTRAP home">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span>MIND<span class="brand-accent">TRAP</span></span>
+    </a>
     <div class="top-actions">
-      <span id="connection-label" class="connection-label">CONNECTING</span>
-      <button id="sfx-toggle" class="button button-quiet" type="button" aria-pressed="true">Mute SFX</button>
-      <button id="music-toggle" class="button button-quiet" type="button">Music: off</button>
+      <span id="connection-label" class="connection-label"><span class="connection-dot"></span> CONNECTING</span>
+      <button id="sfx-toggle" class="button button-quiet compact-button" type="button" aria-pressed="true">SFX ON</button>
+      <button id="music-toggle" class="button button-quiet compact-button" type="button" aria-pressed="false">MUSIC OFF</button>
     </div>
   </header>
 
   <main>
     <section id="home-screen" class="home-screen">
-      <div class="home-card">
-        <p class="eyebrow">A hidden-role word game</p>
-        <h1>Find the<br><span>Impostor.</span></h1>
-        <p class="intro">Get the secret word. Leave a clue. Figure out who doesn't know it.</p>
+      <div class="home-grid-mark" aria-hidden="true"></div>
+      <div class="home-copy">
+        <p class="eyebrow"><span class="eyebrow-line"></span> A SOCIAL DEDUCTION GAME</p>
+        <h1>Trust no<br><span>clue.</span></h1>
+        <p class="intro">Everyone knows the word. Except the one who needs to sound like they do.</p>
         <div class="home-actions">
-          <button id="open-create" class="button button-primary" type="button">Create room</button>
-          <button id="open-join" class="button button-secondary" type="button">Join a room</button>
+          <button id="open-create" class="button button-primary button-large" type="button"><span>Create room</span><span aria-hidden="true">↗</span></button>
+          <button id="open-join" class="button button-secondary button-large" type="button">Join with code</button>
         </div>
-        <p class="home-note">At least 3 players · Voice and chat included</p>
+        <div class="home-meta"><span>03—15 PLAYERS</span><span class="meta-separator"></span><span>VOICE + CHAT</span><span class="meta-separator"></span><span>ONE WORD. MANY LIES.</span></div>
+      </div>
+      <div class="home-art" aria-hidden="true">
+        <div class="orbit orbit-large"></div>
+        <div class="orbit orbit-small"></div>
+        <div class="home-cube cube-back"></div>
+        <div class="home-cube cube-front"><span></span><span></span></div>
+        <div class="art-cross cross-one">+</div>
+        <div class="art-cross cross-two">+</div>
+        <div class="art-caption">IDENTITY<br>UNKNOWN <span>/// 01</span></div>
       </div>
     </section>
 
     <section id="room-screen" class="room-screen hidden" aria-live="polite">
       <div class="room-heading">
-        <div>
-          <p id="room-phase" class="eyebrow">LOBBY</p>
-          <h1 id="room-title">Room <span id="room-code-title">------</span></h1>
+        <div class="room-title-group">
+          <p id="room-phase" class="eyebrow"><span class="eyebrow-line"></span> LOBBY</p>
+          <h1>ROOM <span id="room-code-title">------</span></h1>
+          <p class="room-subtitle">PRIVATE SESSION <span class="room-subtitle-dot"></span> INVITE ONLY</p>
         </div>
         <div class="room-heading-actions">
-          <button id="copy-code" class="button button-secondary" type="button">Copy code</button>
-          <button id="leave-room" class="button button-quiet" type="button">Leave</button>
+          <button id="copy-code" class="button button-secondary" type="button"><span aria-hidden="true">▣</span> Copy code</button>
+          <button id="leave-room" class="button button-quiet" type="button">Leave room <span aria-hidden="true">↗</span></button>
         </div>
       </div>
 
       <section id="voice-toolbar" class="voice-toolbar panel">
-        <div>
-          <strong>Room voice</strong>
-          <span id="voice-status" class="muted">Mic is off. Turn it on when you are ready.</span>
+        <div class="voice-heading">
+          <span class="voice-icon-shell" aria-hidden="true">
+            <svg viewBox="0 0 24 24" class="mic-svg"><rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M9 21h6"></path><path class="mic-slash" d="M3 3 21 21"></path></svg>
+          </span>
+          <div>
+            <strong>ROOM VOICE</strong>
+            <span id="voice-status" class="muted">Mic is off. You can still listen to the room.</span>
+          </div>
         </div>
-        <button id="mic-toggle" class="button button-secondary" type="button">Enable mic</button>
+        <button id="mic-toggle" class="mic-toggle-button" type="button" aria-pressed="false" aria-label="Enable microphone">
+          <svg viewBox="0 0 24 24" class="mic-svg"><rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M9 21h6"></path><path class="mic-slash" d="M3 3 21 21"></path></svg>
+          <span id="mic-toggle-label">MIC OFF</span>
+        </button>
       </section>
 
       <div class="room-layout">
         <section class="main-column">
-          <section id="lobby-panel" class="panel phase-panel">
+          <section id="lobby-panel" class="panel phase-panel lobby-panel">
             <div class="panel-heading">
               <div>
-                <p class="eyebrow">LOBBY</p>
-                <h2>Players</h2>
+                <p class="eyebrow">THE WAITING ROOM</p>
+                <h2>Assemble your crew<span class="heading-period">.</span></h2>
               </div>
               <span id="player-count" class="count-pill">1/8</span>
             </div>
-            <p class="muted">Share the room code. The host starts when everyone is here.</p>
+            <p class="muted lobby-intro">Send the room code to your friends. The match starts when the host is ready.</p>
             <div id="lobby-player-list" class="player-grid"></div>
-            <div id="host-settings" class="settings-grid">
-              <label>Player limit
-                <select id="max-players">
-                  <option value="3">3</option><option value="4">4</option><option value="6">6</option>
-                  <option value="8">8</option><option value="10">10</option><option value="12">12</option><option value="15">15</option>
-                </select>
-              </label>
-              <label>Impostors
-                <select id="impostor-count">
-                  <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
-                </select>
-              </label>
-              <label class="checkbox-label"><input id="shadow-enabled" type="checkbox"> Add a Shadow</label>
+            <div id="host-settings" class="settings-wrap">
+              <div class="settings-heading"><span>ROOM CONFIGURATION</span><span class="settings-rule"></span></div>
+              <div class="settings-grid">
+                <label>PLAYER LIMIT
+                  <select id="max-players">
+                    <option value="3">3 PLAYERS</option><option value="4">4 PLAYERS</option><option value="6">6 PLAYERS</option>
+                    <option value="8">8 PLAYERS</option><option value="10">10 PLAYERS</option><option value="12">12 PLAYERS</option><option value="15">15 PLAYERS</option>
+                  </select>
+                </label>
+                <label>IMPOSTORS
+                  <select id="impostor-count">
+                    <option value="1">1 IMPOSTOR</option><option value="2">2 IMPOSTORS</option><option value="3">3 IMPOSTORS</option><option value="4">4 IMPOSTORS</option>
+                  </select>
+                </label>
+                <label class="checkbox-label"><input id="shadow-enabled" type="checkbox"><span class="custom-check"></span><span><strong>Include the Shadow</strong><small>A third side with a solo win condition</small></span></label>
+              </div>
             </div>
-            <p id="lobby-note" class="muted"></p>
-            <button id="start-game" class="button button-primary full-width" type="button">Start match</button>
+            <p id="lobby-note" class="muted lobby-note"></p>
+            <button id="start-game" class="button button-primary full-width button-large" type="button"><span>Start the match</span><span aria-hidden="true">↗</span></button>
           </section>
 
-          <section id="game-panel" class="panel phase-panel hidden">
+          <section id="game-panel" class="panel phase-panel game-panel hidden">
             <div class="game-heading">
               <div>
-                <p id="phase-label" class="eyebrow">WORD</p>
-                <h2 id="game-title">Secret word</h2>
+                <p id="phase-label" class="eyebrow">WORD ENTRY</p>
+                <h2 id="game-title">The first move<span class="heading-period">.</span></h2>
               </div>
-              <span class="count-pill">ROUND <b id="round-number">1</b></span>
+              <div class="game-heading-meta">
+                <span class="count-pill">ROUND <b id="round-number">1</b></span>
+                <span id="phase-timer" class="phase-timer hidden" aria-live="off">01:30</span>
+              </div>
             </div>
 
+            <section id="identity-card" class="identity-card hidden" aria-live="polite">
+              <div class="identity-main">
+                <div>
+                  <p class="identity-kicker">YOUR ROLE</p>
+                  <p id="role-label" class="role-label">LOADING</p>
+                </div>
+                <span id="role-symbol" class="role-symbol" aria-hidden="true">?</span>
+              </div>
+              <div id="secret-word-wrap" class="secret-word-wrap">
+                <p class="identity-kicker">YOUR SECRET WORD</p>
+                <strong id="secret-word" class="secret-word">Waiting for your private role…</strong>
+              </div>
+              <p id="role-note" class="role-note">Your private role is arriving from the game server.</p>
+            </section>
+
+            <section id="waiting-panel" class="game-state waiting-panel hidden">
+              <div class="state-intro"><span class="state-index">••</span><p class="muted">The match is paused while the room reconnects. You can keep using chat, and voice stays available for connected players.</p></div>
+              <div class="waiting-indicator"><span></span><span></span><span></span></div>
+              <p class="waiting-caption">WAITING FOR AT LEAST TWO ACTIVE PLAYERS</p>
+            </section>
+
             <section id="word-entry-panel" class="game-state hidden">
-              <p id="word-entry-note" class="muted"></p>
+              <div class="state-intro"><span class="state-index">01</span><p id="word-entry-note" class="muted"></p></div>
               <form id="word-entry-form" class="inline-form">
                 <label class="sr-only" for="word-input">Secret word</label>
-                <input id="word-input" maxlength="40" placeholder="Enter a word" autocomplete="off">
-                <button class="button button-primary" type="submit">Set word</button>
+                <input id="word-input" maxlength="40" placeholder="Enter a secret word" autocomplete="off" required>
+                <button class="button button-primary" type="submit">Set word <span aria-hidden="true">↗</span></button>
               </form>
               <button id="word-reselect" class="button button-secondary hidden" type="button">Choose another setter</button>
             </section>
 
             <section id="ready-panel" class="game-state hidden">
-              <div id="role-card" class="role-card">
-                <span id="role-label" class="role-label">INNOCENT</span>
-                <strong id="secret-word" class="secret-word">Your word</strong>
-                <span id="role-note" class="muted">Keep your word private.</span>
-              </div>
-              <p id="ready-progress" class="muted"></p>
-              <button id="ready-button" class="button button-primary" type="button">I'm ready</button>
+              <div class="state-intro"><span class="state-index">02</span><p class="muted">Remember your information. The clue round opens when everyone is ready.</p></div>
+              <p id="ready-progress" class="progress-copy muted"></p>
+              <button id="ready-button" class="button button-primary" type="button">I'm ready <span aria-hidden="true">↗</span></button>
             </section>
 
             <section id="clue-panel" class="game-state hidden">
-              <p id="clue-progress" class="muted"></p>
+              <div class="state-intro"><span class="state-index">03</span><p class="muted">Describe the word without making it too obvious. The Impostor is listening.</p></div>
+              <p id="clue-progress" class="progress-copy muted"></p>
               <form id="clue-form">
-                <label for="clue-input">Write one clue. You can edit it until you submit.</label>
-                <textarea id="clue-input" maxlength="120" rows="3" placeholder="Your description..." required></textarea>
-                <button id="submit-clue" class="button button-primary" type="submit">Submit clue</button>
+                <label for="clue-input">YOUR CLUE <span>One short description</span></label>
+                <textarea id="clue-input" maxlength="120" rows="3" placeholder="Write something that proves you know the word…" required></textarea>
+                <div class="clue-actions">
+                  <button id="submit-clue" class="button button-primary" type="submit">Submit clue <span aria-hidden="true">↗</span></button>
+                  <button id="unsubmit-clue" class="button button-secondary hidden" type="button">Unsubmit / edit</button>
+                  <span id="clue-locked-note" class="muted hidden">Your clue is locked. You can still change it until the clue phase closes.</span>
+                </div>
               </form>
-              <p id="clue-locked-note" class="muted hidden">Your clue is locked. Waiting for the others.</p>
+              <div class="list-heading"><span>PLAYER STATUS</span><span class="list-heading-rule"></span></div>
               <div id="clues-list" class="clue-list"></div>
             </section>
 
             <section id="vote-panel" class="game-state hidden">
-              <p class="muted">Read the clues, talk it out, then lock in your vote.</p>
+              <div class="state-intro"><span class="state-index">04</span><p class="muted">Read every clue, discuss your suspicions, then lock in your vote.</p></div>
+              <div class="list-heading"><span>REVEALED CLUES</span><span class="list-heading-rule"></span></div>
               <div id="vote-clues" class="clue-list"></div>
+              <div class="list-heading"><span>WHO IS THE IMPOSTOR?</span><span class="list-heading-rule"></span></div>
               <div id="vote-options" class="vote-options"></div>
-              <p id="vote-progress" class="muted"></p>
-              <button id="confirm-vote" class="button button-primary" type="button" disabled>Choose a player to vote</button>
-              <p id="vote-locked-note" class="muted hidden">Vote locked. Waiting for the other players.</p>
-            </section>
-
-            <section id="game-over-panel" class="game-state hidden">
-              <p id="winner-copy" class="muted"></p>
-              <button id="new-match" class="button button-primary" type="button">New match</button>
-              <p id="new-match-note" class="muted"></p>
+              <p id="vote-progress" class="progress-copy muted"></p>
+              <div class="vote-actions">
+                <button id="confirm-vote" class="button button-primary" type="button" disabled>Choose a player to vote</button>
+                <button id="skip-vote" class="button button-secondary" type="button">Skip vote</button>
+              </div>
+              <p id="vote-locked-note" class="muted hidden">Your vote is locked. Waiting for the other players.</p>
             </section>
           </section>
         </section>
@@ -141,22 +197,22 @@
         <aside class="side-column">
           <section class="panel roster-panel">
             <div class="panel-heading">
-              <h2>In the room</h2>
+              <div><p class="eyebrow">SESSION ROSTER</p><h2>In the room<span class="heading-period">.</span></h2></div>
               <span id="roster-status" class="muted">LOBBY</span>
             </div>
             <div id="player-list" class="roster-list"></div>
           </section>
           <section id="chat-panel" class="panel chat-panel">
             <div class="panel-heading">
-              <h2>Chat</h2>
+              <div><p class="eyebrow">OPEN CHANNEL</p><h2>Room chat<span class="heading-period">.</span></h2></div>
               <button id="chat-toggle" class="button button-quiet button-small" type="button" aria-expanded="true">Hide</button>
             </div>
             <div id="chat-content">
               <div id="chat-messages" class="chat-messages"></div>
               <form id="chat-form" class="chat-form">
                 <label class="sr-only" for="chat-input">Message</label>
-                <input id="chat-input" maxlength="300" placeholder="Message the room..." autocomplete="off">
-                <button class="button button-secondary" type="submit" aria-label="Send message">Send</button>
+                <input id="chat-input" maxlength="300" placeholder="Say something…" autocomplete="off">
+                <button class="send-button" type="submit" aria-label="Send message"><span aria-hidden="true">↗</span></button>
               </form>
             </div>
           </section>
@@ -166,24 +222,49 @@
   </main>
 
   <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-    <div class="modal-card">
+    <div class="modal-card panel">
       <button id="close-modal" class="modal-close button button-quiet" type="button" aria-label="Close">×</button>
       <div id="modal-content"></div>
     </div>
   </div>
+
   <div id="vote-result-overlay" class="result-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="vote-result-title">
-    <div class="result-card panel">
-      <p class="eyebrow">VOTE REVEAL</p>
-      <h2 id="vote-result-title">Results</h2>
+    <div class="result-card panel vote-result-card">
+      <p class="eyebrow">VOTE REVEAL <span class="eyebrow-line"></span></p>
+      <h2 id="vote-result-title">The room has decided<span class="heading-period">.</span></h2>
       <p id="vote-result-copy" class="muted"></p>
       <div id="vote-details" class="vote-details"></div>
-      <button id="dismiss-vote-result" class="button button-primary full-width" type="button">Continue</button>
+      <button id="dismiss-vote-result" class="button button-primary full-width" type="button">Continue <span aria-hidden="true">↗</span></button>
     </div>
   </div>
+
+  <div id="game-result-overlay" class="result-overlay game-result-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="game-result-title">
+    <div id="game-result-card" class="result-card panel game-result-card">
+      <p class="eyebrow result-overline">MATCH COMPLETE <span class="eyebrow-line"></span></p>
+      <div class="result-stage">
+        <canvas id="cuby-left" class="cuby-canvas cuby-left" aria-label="Animated game mascot"></canvas>
+        <div class="result-center">
+          <p id="game-result-kicker" class="result-kicker">THE CREW SURVIVED</p>
+          <h2 id="game-result-title">VICTORY</h2>
+          <p id="game-result-copy" class="result-copy"></p>
+          <span id="game-result-team" class="result-team-pill">INNOCENTS</span>
+        </div>
+        <canvas id="cuby-right" class="cuby-canvas cuby-right" aria-label="Animated game mascot"></canvas>
+      </div>
+      <div class="result-footer">
+        <p id="new-match-note" class="muted"></p>
+        <button id="new-match" class="button button-primary" type="button">Play another round <span aria-hidden="true">↗</span></button>
+        <button id="close-game-result" class="button button-quiet" type="button">View room</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/runtime-config.js"></script>
-  <script src="app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js" defer></script>
+  <script type="module" src="cuby.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

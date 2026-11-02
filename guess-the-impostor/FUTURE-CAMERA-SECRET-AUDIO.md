@@ -1,18 +1,20 @@
-# Planned feature: camera + secret sound for regular players
+# Future feature notes: camera + private secret sound
 
-This feature is intentionally not switched on in the current build. The current update focuses on making rooms, word entry, 20-second turns, discussion, votes, chat, and microphone voice work first.
+Camera sharing and private secret-sound events are **not implemented** in the current build. The current source includes microphone voice, chat, phase timers, clue editing, vote skipping, reconnecting while the server process is alive, and Cuby result animations.
 
-## Intended behavior
+## Current role identifiers
 
-- Every player can explicitly enable their camera using the browser's camera permission prompt.
-- Normal microphone voice remains available to every player, including eliminated players.
-- At a random moment chosen by the server, all **regular players only** receive an instruction to play a secret sound locally.
-- The impostor receives no secret-sound event and must not receive the secret sound file URL or name.
-- The secret sound is separate from microphone audio. Do not mix it into the microphone track, or the impostor will hear it through voice chat.
+The server uses these exact role strings:
 
-## Where camera code belongs
+- `innocent`
+- `impostor`
+- `shadow`
 
-The current mic function is in `public/app.js`, in `enableMic()`. Add a separate camera stream there rather than changing the microphone stream:
+There is no `player` role. If a future secret sound is intended for the non-Impostor side, explicitly define whether that means `innocent` only or both `innocent` and `shadow`. The Shadow is a separate winning side even though it knows the word.
+
+## Camera feature outline
+
+Use a separate camera stream. Do not request camera permission automatically; ask only after a player clicks an explicit camera control.
 
 ```js
 let cameraStream = null;
@@ -23,49 +25,45 @@ async function enableCamera() {
       video: { facingMode: "user" },
       audio: false
     });
-    document.getElementById("local-camera").srcObject = cameraStream;
+    const video = document.getElementById("local-camera");
+    if (video) video.srcObject = cameraStream;
   } catch (error) {
+    console.warn("Camera access failed.", error);
     toast("Allow camera access to turn on your camera.");
   }
 }
+
+function stopCamera() {
+  cameraStream?.getTracks().forEach(track => track.stop());
+  cameraStream = null;
+  const video = document.getElementById("local-camera");
+  if (video) video.srcObject = null;
+}
 ```
 
-Add this video element to `public/index.html` in the game voice/video panel:
+A local preview alone does not send video to other players. Remote video requires adding video transceivers to the WebRTC negotiation and designing bandwidth controls, privacy indicators, and reconnect handling. Keep camera tracks separate from microphone tracks.
 
-```html
-<video id="local-camera" autoplay muted playsinline></video>
-```
+## Private secret-sound outline
 
-Add an explicit **Enable camera** button and call `enableCamera()` only after the player clicks it. Stop `cameraStream.getTracks()` when the player leaves the room.
+Do not broadcast a private sound event to the entire Socket.IO room. Choose an exact sound file from a server-side allow-list, then send the event directly to the intended connected players using each player's current `socketId`.
 
-## Where the secret-sound event belongs
-
-Do not broadcast a secret-sound event to the whole Socket.IO room. Add a server event in `server.js` that sends it only to players whose server-side `room.roles[player.id] === "player"`:
+For both Innocents and the Shadow to receive the sound, the role filter would be:
 
 ```js
-function sendSecretSoundToRegulars(room, soundFile) {
-  for (const player of activePlayers(room)) {
-    if (room.roles[player.id] === "player") {
-      io.to(player.id).emit("secret-sound:play", { file: soundFile });
+function sendSecretSoundToNonImpostors(room, soundFile) {
+  for (const player of room.players) {
+    const role = room.roles[player.id];
+    if (player.connected && player.socketId && (role === "innocent" || role === "shadow")) {
+      io.to(player.socketId).emit("secret-sound:play", { file: soundFile });
     }
   }
 }
 ```
 
-Choose `soundFile` randomly from an allow-listed array on the server. Do not accept a sound filename from a client. Trigger this only during a game phase where the sound is allowed.
+Do not accept arbitrary file paths or filenames from a client. Use an allow-list of exact sound assets and trigger the event only in a phase where the sound is allowed. Keep secret sounds separate from WebRTC microphone audio, or the Impostor may hear them through voice chat.
 
-In `public/app.js`, receive the event and play it locally:
+A client-side receiver should validate that the received path matches the expected secret-sound directory before creating an `Audio` object. Treat this as game secrecy, not DRM: a modified client can inspect its own browser traffic. Do not use it to distribute sensitive or licensed material.
 
-```js
-socket.on("secret-sound:play", ({ file }) => {
-  if (typeof file !== "string" || !file.startsWith("/assets/secret-sounds/")) return;
-  const audio = new Audio(file);
-  audio.play().catch(() => toast("Tap the page to allow sound playback."));
-});
-```
+## Timer settings in this build
 
-Place your sound files in `public/assets/secret-sounds/` and use a server-side allow-list of exact filenames. Keep those sounds separate from WebRTC mic tracks.
-
-## Important limitation
-
-This design keeps the sound event away from impostor sockets in the normal game flow, but a modified client can inspect its own browser traffic. It is game secrecy, not DRM or a security boundary. Camera and microphone must always be enabled only after clear player consent.
+Current server defaults are 90 seconds for word entry, 45 seconds for ready, 90 seconds for clues, and 60 seconds for voting. There is no 20-second turn timer in the current implementation.

@@ -1,47 +1,76 @@
 # MINDTRAP
 
-A multiplayer word-and-deduction game built with Node.js, Express, Socket.IO, and WebRTC.
+MINDTRAP is a small-room multiplayer hidden-role word game built with Node.js, Express, Socket.IO, and WebRTC. The client uses vanilla JavaScript, CSS animations, GSAP 3.15.0 motion, and a Three.js Cuby renderer with a lightweight canvas fallback.
 
 ## Run locally
 
 1. Install Node.js 18 or newer.
-2. From this folder, run `npm install` and then `npm start`.
-3. Open `http://localhost:3000` in a modern browser.
-4. Create a room and share its six-character code.
+2. Open a terminal in this project folder (the folder containing `package.json`).
+3. Run `npm install`.
+4. Run `npm start`.
+5. Open `http://localhost:3000` in a modern browser.
+6. Create a room and share its six-character code. Open the site in separate browsers or devices to test multiplayer.
 
-Use the Node server for multiplayer; VS Code Live Server does not run Socket.IO.
+Do not use VS Code Live Server for multiplayer testing. Live Server does not run the Express server, Socket.IO events, room timers, or server-side game rules.
 
-## How a match works
+Useful commands:
 
-1. The host chooses the player limit, Impostor count, and whether to include a Shadow.
-2. The server assigns roles and privately chooses a non-Impostor word setter.
-3. Innocents and the Shadow see the secret word. Impostors do not.
-4. Every connected player marks ready. The clue phase opens when everyone is ready.
-5. Each connected player writes and locks one clue. Clues stay hidden until every connected player submits.
-6. Discuss the revealed clues and vote for another active player. Votes and voter identities stay private until all connected players have voted.
-7. Results reveal the vote choices and the eliminated player's role. If the match continues, the next clue round begins automatically with the same word and roles.
-8. A new match resets the roles and selects a new word.
+```bash
+npm run check
+npm test
+npm start
+```
 
-There are no gameplay countdowns. A player's local chat and voice controls do not affect other players.
+## Match flow
 
-## Roles and wins
+1. The host chooses the room size, Impostor count, and optional Shadow.
+2. At least three players must be connected. Offline lobby players must be removed before the host can start, so roles are never assigned to ghost players.
+3. The server assigns roles. One connected Innocent is selected as the word setter. Neither the Impostor nor the Shadow can be selected.
+4. The word setter privately submits a word. Innocents and the Shadow receive it privately; the Impostor does not.
+5. The identity card stays visible through the ready, clue, voting, and temporary waiting phases. A missing private role is shown as loading rather than incorrectly assuming the player is Innocent.
+6. Players mark ready. If the ready timer expires, connected active players are marked ready automatically.
+7. Each active player writes a clue. Submitted clues can be unsubmitted and edited while the clue phase remains open. The server locks editing once voting begins. If the clue timer expires, missing clues are automatically filled with the saved draft or `No clue submitted.`
+8. Clues are revealed, then each connected active player votes for another active player or skips. A skipped vote is counted separately and does not add to a player's vote total. A unique highest vote eliminates that player; a tie eliminates nobody.
+9. Vote results are grouped by player and show totals such as `×2` and `×3`. If the match continues, a new clue round begins with the same roles and word.
+10. If fewer than two active players are connected during a match, the match pauses. It resumes when enough players reconnect. Reconnecting players receive their current private state.
+11. The host can start a new match after the result screen. Roles, word, clues, votes, and results are reset.
 
-- **Innocent:** knows the word; wins with the Innocents when every Impostor is eliminated.
-- **Impostor:** does not know the word; wins when Impostors equal or outnumber all other living players, including the Shadow.
-- **Shadow (optional):** knows the word and wins alone if uniquely receiving the most votes and being eliminated.
+## Roles and win conditions
 
-A tied vote eliminates nobody. The Shadow cannot also be an Impostor.
+- **Innocent:** knows the word, can be selected as the word setter, and wins when every Impostor is eliminated.
+- **Impostor:** does not know the word and wins when the living Impostors equal or outnumber all other living players, including the Shadow.
+- **Shadow (optional):** knows the word, cannot be the word setter, and wins alone when the Shadow is uniquely voted out. If the Impostors win by parity or the Innocents eliminate every Impostor, the Shadow loses.
 
-## Voice, chat, and reconnecting
+## Voice and chat
 
-Chat works in the lobby and during a match. To talk, each player must click **Enable mic** and grant browser permission. The host can remove offline players; players who disconnect can rejoin from the same browser using their saved room session. Voice uses a peer-to-peer WebRTC mesh for small rooms. STUN is configured by default; set `TURN_URLS`, `TURN_USERNAME`, and `TURN_CREDENTIAL` for a TURN service on Render.
+- Chat works in the lobby and during the match, including for eliminated players.
+- Players must explicitly enable their microphone and grant browser permission. Microphone mute only stops the local outgoing track; the voice connections remain available so a muted player can keep listening.
+- Each player can locally mute another player's incoming audio without affecting that player's microphone for everyone else.
+- Eliminated players remain in the room and can continue using chat and voice.
+- Voice uses a peer-to-peer WebRTC mesh intended for small rooms. Google STUN is configured by default. Some networks require a TURN server; see `RENDER-SETUP.md`.
 
-Rooms are stored in server memory and disappear when the server restarts. Keep rooms small; use an SFU for larger games.
+## Timers and AFK handling
+
+Default phase timers are 90 seconds for word entry, 45 seconds for ready, 90 seconds for clues, and 60 seconds for voting. Word entry rotates to another connected Innocent when possible. Ready timeouts auto-mark connected active players ready, clue timeouts submit a saved draft or placeholder, and voting timeouts count missing votes as skips.
+
+## Design and animation
+
+The visual system uses a dark Neon Noir palette with violet for primary actions, cyan for Innocent-related elements, coral for Impostor, gold for Shadow, and green for success. Typing dots, microphone slash transitions, player cards, vote bars, overlays, and result titles use CSS/GSAP animation.
+
+Three.js 0.187.0 is loaded from a CDN for the two 3D Cuby characters on the Victory/Defeat screen. If the CDN or WebGL is unavailable, the game uses an animated canvas fallback. Internet access is needed for the optional CDN libraries and hosted fonts; core game logic does not depend on Three.js or GSAP.
+
+## Runtime and limitations
+
+- Room state, chat history, and reconnect tokens are held in server memory. Rejoining works while the same server process and room still exist. A server restart clears rooms and invalidates those sessions.
+- Rooms with no connected players are removed after ten minutes.
+- There is no account system, database persistence, or camera/secret-sound feature in this build.
+- WebRTC mesh voice becomes less suitable as room sizes grow. Use an SFU for larger rooms.
+- This is a private-room prototype, not a hardened public competitive service. Continue testing before opening it to unknown users.
 
 ## Deployment
 
-The GitHub repository contains this project in `guess-the-impostor`. In Render, set the Root Directory to `guess-the-impostor`, Build Command to `npm install`, and Start Command to `npm start`. The server exposes `/health` for health checks. See [RENDER-SETUP.md](./RENDER-SETUP.md) for voice configuration.
+For Render settings, environment variables, TURN setup, and update commands, see `RENDER-SETUP.md`.
 
-## Audio
+## Audio assets
 
-See [public/assets/audio/README.txt](./public/assets/audio/README.txt) for the available music and sound-effect files.
+No MP3 files are included in this source package. Optional file names and locations are listed in `public/assets/audio/README.txt`. The game remains usable without them; missing sound effects are silently skipped and missing background music displays a notice.

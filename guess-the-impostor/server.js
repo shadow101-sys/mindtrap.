@@ -1,22 +1,51 @@
+"use strict";
+
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const path = require("path");
 const crypto = require("crypto");
+const { countVotes, groupVoteCounts, maxBalancedImpostors, assignRoles, canSetWord, personalOutcome } = require("./lib/game-logic");
+
+const PORT = Number(process.env.PORT) || 3000;
+const MAX_PLAYERS = 15;
+const ROOM_IDLE_TTL = 10 * 60 * 1000;
+const PHASE_DURATIONS = {
+  "word-entry": 90 * 1000,
+  ready: 45 * 1000,
+  clues: 90 * 1000,
+  voting: 60 * 1000
+};
+const DEFAULT_ALLOWED_ORIGINS = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000"
+];
+const allowedOrigins = new Set([
+  ...DEFAULT_ALLOWED_ORIGINS,
+  ...String(process.env.ALLOWED_ORIGINS || "").split(",").map(value => value.trim()).filter(Boolean)
+]);
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: true, methods: ["GET", "POST"] },
+  allowRequest(request, callback) {
+    const origin = request.headers.origin;
+    const protocol = String(request.headers["x-forwarded-proto"] || (request.socket.encrypted ? "https" : "http")).split(",")[0].trim();
+    const host = String(request.headers["x-forwarded-host"] || request.headers.host || "").split(",")[0].trim();
+    const sameOrigin = origin && host && origin === `${protocol}://${host}`;
+    callback(null, !origin || sameOrigin || allowedOrigins.has(origin));
+  },
   pingInterval: 25000,
-  pingTimeout: 20000
+  pingTimeout: 20000,
+  maxHttpBufferSize: 1e6
 });
-const PORT = Number(process.env.PORT) || 3000;
-const rooms = new Map();
-const MAX_PLAYERS = 15;
 
+const rooms = new Map();
 const turnUrls = String(process.env.TURN_URLS || "").split(",").map(value => value.trim()).filter(Boolean);
-const iceServers = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }];
+const iceServers = [
+  { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }
+];
 if (turnUrls.length && process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL) {
   iceServers.push({
     urls: turnUrls,
@@ -29,29 +58,39 @@ app.get("/runtime-config.js", (_request, response) => {
   response.set("Cache-Control", "no-store");
   response.type("application/javascript").send(`window.MINDTRAP_CONFIG = ${JSON.stringify({ iceServers })};`);
 });
-app.use(express.static(path.join(__dirname, "public")));
 app.get("/health", (_request, response) => response.json({ ok: true, service: "mindtrap" }));
+app.use(express.static(path.join(__dirname, "public")));
 
-const random = items => items[Math.floor(Math.random() * items.length)];
-function shuffle(items) {
-  const result = [...items];
-  for (let index = result.length - 1; index > 0; index--) {
-    const swap = Math.floor(Math.random() * (index + 1));
-    [result[index], result[swap]] = [result[swap], result[index]];
-  }
-  return result;
-}
+const random = items => items[crypto.randomInt(items.length)];
 const roomCode = () => crypto.randomBytes(3).toString("hex").toUpperCase();
 const tokenHash = token => crypto.createHash("sha256").update(token).digest();
 
+function ack(callback, result) {
+  if (typeof callback === "function") callback(result);
+}
+function rateLimit(socket, key, limit, windowMs) {
+  const now = Date.now();
+  socket.data.rateLimits ||= new Map();
+  const current = socket.data.rateLimits.get(key) || { start: now, count: 0 };
+  if (now - current.start >= windowMs) {
+    current.start = now;
+    current.count = 0;
+  }
+  current.count += 1;
+  socket.data.rateLimits.set(key, current);
+  return current.count <= limit;
+}
 function findRoomForSocket(socketId) {
-  return [...rooms.values()].find(room => room.players.some(player => player.socketId === socketId));
+  for (const room of rooms.values()) {
+    if (room.players.some(player => player.socketId === socketId && player.connected)) return room;
+  }
+  return null;
 }
 function findPlayer(room, playerId) {
   return room.players.find(player => player.id === playerId);
 }
 function findPlayerForSocket(room, socketId) {
-  return room.players.find(player => player.socketId === socketId);
+  return room.players.find(player => player.socketId === socketId && player.connected);
 }
 function activePlayers(room) {
   return room.players.filter(player => !player.eliminated);
@@ -59,8 +98,15 @@ function activePlayers(room) {
 function connectedActivePlayers(room) {
   return room.players.filter(player => player.connected && !player.eliminated);
 }
-function ack(callback, result) {
-  if (typeof callback === "function") callback(result);
+function livingRolePlayers(room) {
+  return activePlayers(room).filter(player => room.roles[player.id]);
+}
+function clearRoomTimers(room) {
+  if (room.phaseTimer) clearTimeout(room.phaseTimer);
+  if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+  room.phaseTimer = null;
+  room.cleanupTimer = null;
+  room.phaseDeadline = null;
 }
 
 function publicRoom(room) {
@@ -70,6 +116,7 @@ function publicRoom(room) {
     hostId: room.hostId,
     phase: room.phase,
     round: room.round,
+    phaseDeadline: room.phaseDeadline,
     settings: room.settings,
     players: room.players.map(player => ({
       id: player.id,
@@ -84,7 +131,7 @@ function publicRoom(room) {
     })),
     readyCount: connectedActivePlayers(room).filter(player => player.ready).length,
     clueCount: connectedActivePlayers(room).filter(player => player.clueSubmitted).length,
-    voteCount: room.votes.length,
+    voteCount: room.votes.filter(vote => connectedActivePlayers(room).some(player => player.id === vote.voterId)).length,
     requiredActions: connectedActivePlayers(room).length,
     clues: revealClues ? room.clues.map(clue => ({ playerId: clue.playerId, text: clue.text })) : [],
     wordSubmitted: !!room.word,
@@ -95,30 +142,41 @@ function publicRoom(room) {
   };
 }
 
+function personalResultFor(room, player) {
+  const role = room.roles[player.id] || null;
+  return room.winner ? personalOutcome(role, room.winner.role) : null;
+}
 function sendPrivateState(room) {
   for (const player of room.players) {
     if (!player.connected || !player.socketId) continue;
     const role = room.roles[player.id] || null;
     io.to(player.socketId).emit("game:private", {
+      playerId: player.id,
+      phase: room.phase,
+      round: room.round,
       role,
       word: role === "innocent" || role === "shadow" ? room.word : null,
       isWordSetter: room.wordSetterId === player.id,
       ready: player.ready,
+      clueDraft: player.clueDraft,
       hasSubmittedClue: player.clueSubmitted,
-      hasVoted: room.votes.some(vote => vote.voterId === player.id)
+      hasVoted: room.votes.some(vote => vote.voterId === player.id),
+      result: personalResultFor(room, player)
     });
   }
 }
-function sendRoom(room) {
-  io.to(room.code).emit("room:update", publicRoom(room));
-  sendPrivateState(room);
+
+function eligibleWordSetters(room, excludedId = null) {
+  // The word setter must be an Innocent. Neither the Impostor nor Shadow can be selected.
+  return connectedActivePlayers(room).filter(player =>
+    canSetWord(room.roles[player.id]) && player.id !== excludedId
+  );
 }
-function eligibleWordSetters(room) {
-  return connectedActivePlayers(room).filter(player => room.roles[player.id] !== "impostor");
-}
-function selectWordSetter(room) {
-  const candidates = eligibleWordSetters(room);
-  room.wordSetterId = candidates.length ? random(candidates).id : null;
+function selectWordSetter(room, excludedId = null) {
+  const candidates = eligibleWordSetters(room, excludedId);
+  if (candidates.length) room.wordSetterId = random(candidates).id;
+  else if (!findPlayer(room, room.wordSetterId)?.connected) room.wordSetterId = eligibleWordSetters(room)[0]?.id || null;
+  return room.wordSetterId;
 }
 function setWinner(room, role, playerId = null) {
   room.winner = { role, playerId };
@@ -126,10 +184,9 @@ function setWinner(room, role, playerId = null) {
 }
 function evaluateTeamVictory(room) {
   if (Object.keys(room.roles).length === 0 || room.phase === "lobby" || room.phase === "game-over") return;
-  const living = activePlayers(room);
+  const living = livingRolePlayers(room);
   const impostors = living.filter(player => room.roles[player.id] === "impostor").length;
   const nonImpostors = living.filter(player => room.roles[player.id] !== "impostor").length;
-
   if (impostors === 0) setWinner(room, "innocents");
   else if (impostors >= nonImpostors) setWinner(room, "impostors");
 }
@@ -144,44 +201,61 @@ function startClueRound(room, incrementRound = false) {
   }
   room.phase = "clues";
 }
-function advanceAfterVotes(room) {
-  if (room.phase === "ready" && connectedActivePlayers(room).length > 0
-      && connectedActivePlayers(room).every(player => player.ready)) {
-    startClueRound(room);
-  } else if (room.phase === "clues" && connectedActivePlayers(room).length > 0
-      && connectedActivePlayers(room).every(player => player.clueSubmitted)) {
-    room.phase = "voting";
-  } else if (room.phase === "voting" && connectedActivePlayers(room).length > 0
-      && connectedActivePlayers(room).every(player => room.votes.some(vote => vote.voterId === player.id))) {
-    resolveVotes(room);
+
+function schedulePhaseTimeout(room) {
+  const duration = PHASE_DURATIONS[room.phase];
+  if (!duration) {
+    if (room.phaseTimer) clearTimeout(room.phaseTimer);
+    room.phaseTimer = null;
+    room.phaseTimerPhase = room.phase;
+    room.phaseDeadline = null;
     return;
   }
-  sendRoom(room);
+  if (room.phaseTimer && room.phaseTimerPhase === room.phase) return;
+  if (room.phaseTimer) clearTimeout(room.phaseTimer);
+  room.phaseTimer = null;
+  room.phaseTimerPhase = room.phase;
+  if (!connectedActivePlayers(room).length) {
+    room.phaseDeadline = null;
+    return;
+  }
+  room.phaseDeadline = Date.now() + duration;
+  room.phaseTimer = setTimeout(() => handlePhaseTimeout(room), duration);
+  room.phaseTimer.unref?.();
 }
+
+function sendRoom(room) {
+  if (!rooms.has(room.code)) return;
+  schedulePhaseTimeout(room);
+  io.to(room.code).emit("room:update", publicRoom(room));
+  sendPrivateState(room);
+}
+
 function resolveVotes(room) {
   if (room.phase !== "voting") return;
-  const counts = {};
-  for (const vote of room.votes) counts[vote.targetId] = (counts[vote.targetId] || 0) + 1;
-  const highest = Math.max(0, ...Object.values(counts));
-  const leaders = Object.keys(counts).filter(playerId => counts[playerId] === highest && highest > 0);
-  const eliminatedId = leaders.length === 1 ? leaders[0] : null;
+  const decision = countVotes(room.votes);
+  const eliminatedId = decision.eliminatedId;
   const eliminatedPlayer = eliminatedId ? findPlayer(room, eliminatedId) : null;
 
-  if (eliminatedPlayer && !eliminatedPlayer.eliminated) {
-    eliminatedPlayer.eliminated = true;
-  }
+  if (eliminatedPlayer && !eliminatedPlayer.eliminated) eliminatedPlayer.eliminated = true;
+
+  const summary = groupVoteCounts(room.votes, room.players);
   const voteResults = {
     id: crypto.randomUUID(),
     votes: room.votes.map(vote => ({
       voterId: vote.voterId,
       voterName: findPlayer(room, vote.voterId)?.name || "Player",
-      targetId: vote.targetId,
-      targetName: findPlayer(room, vote.targetId)?.name || "Player"
+      targetId: vote.targetId || null,
+      targetName: vote.targetId ? (findPlayer(room, vote.targetId)?.name || "Player") : "Skipped",
+      skipped: !vote.targetId
     })),
+    groupedCounts: summary.groups,
+    skippedCount: summary.skipped,
     eliminatedId: eliminatedPlayer?.id || null,
     eliminatedName: eliminatedPlayer?.name || null,
     eliminatedRole: eliminatedPlayer ? room.roles[eliminatedPlayer.id] : null,
-    tied: leaders.length > 1 || leaders.length === 0
+    tied: decision.tied,
+    noVotes: summary.groups.length === 0
   };
   room.lastVoteResults = voteResults;
 
@@ -197,7 +271,97 @@ function resolveVotes(room) {
     return;
   }
   startClueRound(room, true);
+  advanceAfterActions(room);
+}
+
+function advanceAfterActions(room) {
+  if (room.phase !== "lobby" && room.phase !== "game-over") {
+    const connectedCount = connectedActivePlayers(room).length;
+    if (connectedCount < 2) {
+      if (room.phase !== "waiting") room.waitingPhase = room.phase;
+      room.phase = "waiting";
+      sendRoom(room);
+      return;
+    }
+    if (room.phase === "waiting") {
+      room.phase = room.waitingPhase || "clues";
+      room.waitingPhase = null;
+    }
+    if (room.phase === "word-entry" && !eligibleWordSetters(room).length) {
+      room.waitingPhase = "word-entry";
+      room.phase = "waiting";
+      sendRoom(room);
+      return;
+    }
+    if (room.phase === "word-entry" && !findPlayer(room, room.wordSetterId)?.connected) selectWordSetter(room);
+  }
+  if (room.phase === "ready" && connectedActivePlayers(room).length > 0
+      && connectedActivePlayers(room).every(player => player.ready)) {
+    startClueRound(room);
+  } else if (room.phase === "clues" && connectedActivePlayers(room).length > 0
+      && connectedActivePlayers(room).every(player => player.clueSubmitted)) {
+    room.phase = "voting";
+  } else if (room.phase === "voting" && connectedActivePlayers(room).length > 0
+      && connectedActivePlayers(room).every(player => room.votes.some(vote => vote.voterId === player.id))) {
+    resolveVotes(room);
+    return;
+  }
   sendRoom(room);
+}
+
+function handlePhaseTimeout(room) {
+  room.phaseTimer = null;
+  room.phaseDeadline = null;
+  if (!rooms.has(room.code)) return;
+  const participants = connectedActivePlayers(room);
+  if (!participants.length) {
+    room.phaseTimerPhase = null;
+    return;
+  }
+
+  if (room.phase === "word-entry") {
+    const previousSetter = room.wordSetterId;
+    selectWordSetter(room, previousSetter);
+    room.phaseTimerPhase = null;
+    io.to(room.code).emit("game:notice", {
+      message: room.wordSetterId && room.wordSetterId !== previousSetter
+        ? "The word setter timed out. A new Innocent was selected."
+        : "The word setter needs more time. The entry timer has restarted."
+    });
+    sendRoom(room);
+    return;
+  }
+
+  if (room.phase === "ready") {
+    for (const player of participants) player.ready = true;
+    io.to(room.code).emit("game:notice", { message: "The ready timer ended. The clue round is starting." });
+    advanceAfterActions(room);
+    return;
+  }
+
+  if (room.phase === "clues") {
+    for (const player of participants) {
+      if (player.clueSubmitted) continue;
+      const text = player.clueDraft.trim().slice(0, 120) || "No clue submitted.";
+      player.clueDraft = text;
+      player.clueSubmitted = true;
+      room.clues = room.clues.filter(clue => clue.playerId !== player.id);
+      room.clues.push({ playerId: player.id, text });
+    }
+    io.to(room.code).emit("game:notice", { message: "Time is up. Missing clues were marked automatically." });
+    advanceAfterActions(room);
+    return;
+  }
+
+  if (room.phase === "voting") {
+    for (const player of participants) {
+      if (!room.votes.some(vote => vote.voterId === player.id)) {
+        room.votes.push({ voterId: player.id, targetId: null, skipped: true });
+      }
+    }
+    io.to(room.code).emit("game:notice", { message: "Voting time is up. Missing votes were counted as skips." });
+    resolveVotes(room);
+  }
 }
 
 function makePlayer(name, socket, token) {
@@ -205,7 +369,7 @@ function makePlayer(name, socket, token) {
     id: crypto.randomUUID(),
     tokenHash: tokenHash(token),
     socketId: socket.id,
-    name: String(name || "Player").trim().slice(0, 20) || "Player",
+    name: String(name || "Player").trim().replace(/\s+/g, " ").slice(0, 20) || "Player",
     connected: true,
     eliminated: false,
     voiceEnabled: false,
@@ -214,6 +378,7 @@ function makePlayer(name, socket, token) {
     clueSubmitted: false
   };
 }
+
 function removePlayer(room, player) {
   room.players = room.players.filter(candidate => candidate.id !== player.id);
   delete room.roles[player.id];
@@ -224,18 +389,28 @@ function removePlayer(room, player) {
   }
   if (room.wordSetterId === player.id && room.phase === "word-entry") selectWordSetter(room);
 }
-function reselectDisconnectedWordSetter(room) {
-  if (room.phase !== "word-entry" || findPlayer(room, room.wordSetterId)?.connected) return false;
-  selectWordSetter(room);
-  return true;
+
+function scheduleRoomCleanup(room) {
+  if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+  if (room.players.some(player => player.connected)) return;
+  room.cleanupTimer = setTimeout(() => {
+    if (!room.players.some(player => player.connected)) {
+      clearRoomTimers(room);
+      rooms.delete(room.code);
+    }
+  }, ROOM_IDLE_TTL);
+  room.cleanupTimer.unref?.();
 }
 
 io.on("connection", socket => {
   socket.on("room:create", (payload = {}, callback) => {
-    const maxPlayers = Math.max(3, Math.min(MAX_PLAYERS, Number(payload.maxPlayers) || 8));
+    if (!rateLimit(socket, "room-create", 3, 60_000)) {
+      return ack(callback, { ok: false, error: "Too many room requests. Try again in a minute." });
+    }
+    const maxPlayers = Math.max(3, Math.min(MAX_PLAYERS, Math.floor(Number(payload.maxPlayers) || 8)));
     const shadowEnabled = payload.shadowEnabled === true;
-    const maxImpostors = Math.max(1, maxPlayers - (shadowEnabled ? 2 : 1));
-    const impostors = Math.max(1, Math.min(4, Number(payload.impostors) || 1, maxImpostors));
+    const maxImpostors = maxBalancedImpostors(maxPlayers, shadowEnabled);
+    const impostors = Math.max(1, Math.min(4, Math.floor(Number(payload.impostors) || 1), maxImpostors));
     const token = crypto.randomBytes(32).toString("hex");
     const player = makePlayer(payload.name, socket, token);
     let code = roomCode();
@@ -245,6 +420,10 @@ io.on("connection", socket => {
       hostId: player.id,
       players: [player],
       phase: "lobby",
+      phaseTimer: null,
+      phaseTimerPhase: "lobby",
+      phaseDeadline: null,
+      cleanupTimer: null,
       round: 0,
       settings: { maxPlayers, impostors, shadowEnabled },
       roles: {},
@@ -254,6 +433,7 @@ io.on("connection", socket => {
       votes: [],
       winner: null,
       lastVoteResults: null,
+      waitingPhase: null,
       chatHistory: []
     };
     rooms.set(code, room);
@@ -263,7 +443,11 @@ io.on("connection", socket => {
   });
 
   socket.on("room:join", (payload = {}, callback) => {
+    if (!rateLimit(socket, "room-join", 8, 60_000)) {
+      return ack(callback, { ok: false, error: "Too many room attempts. Wait a moment and try again." });
+    }
     const code = String(payload.code || "").trim().toUpperCase();
+    if (!/^[A-F0-9]{6}$/.test(code)) return ack(callback, { ok: false, error: "Enter a valid six-character room code." });
     const room = rooms.get(code);
     if (!room) return ack(callback, { ok: false, error: "Room not found." });
     if (room.phase !== "lobby") return ack(callback, { ok: false, error: "This match has already started." });
@@ -272,19 +456,25 @@ io.on("connection", socket => {
     const player = makePlayer(payload.name, socket, token);
     room.players.push(player);
     socket.join(code);
+    if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+    room.cleanupTimer = null;
     ack(callback, { ok: true, code, token });
     sendRoom(room);
   });
 
   socket.on("room:rejoin", (payload = {}, callback) => {
+    if (!rateLimit(socket, "room-rejoin", 8, 60_000)) {
+      return ack(callback, { ok: false, error: "Too many reconnect attempts. Try again shortly." });
+    }
     const code = String(payload.code || "").trim().toUpperCase();
     const token = String(payload.token || "");
+    if (!/^[A-F0-9]{6}$/.test(code) || token.length < 32 || token.length > 128) {
+      return ack(callback, { ok: false, error: "The saved room session is invalid." });
+    }
     const room = rooms.get(code);
-    const player = room?.players.find(candidate => {
-      const supplied = tokenHash(token);
-      return candidate.tokenHash.length === supplied.length
-        && crypto.timingSafeEqual(candidate.tokenHash, supplied);
-    });
+    const supplied = tokenHash(token);
+    const player = room?.players.find(candidate => candidate.tokenHash.length === supplied.length
+      && crypto.timingSafeEqual(candidate.tokenHash, supplied));
     if (!room || !player) return ack(callback, { ok: false, error: "This saved room session is no longer available." });
 
     const previousSocketId = player.socketId;
@@ -292,14 +482,12 @@ io.on("connection", socket => {
     player.connected = true;
     player.voiceEnabled = false;
     socket.join(code);
-    if (previousSocketId && previousSocketId !== socket.id) {
-      io.sockets.sockets.get(previousSocketId)?.disconnect(true);
-    }
-    if (!room.players.some(candidate => candidate.connected && candidate.id === room.hostId)) {
-      room.hostId = player.id;
-    }
+    if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+    room.cleanupTimer = null;
+    if (previousSocketId && previousSocketId !== socket.id) io.sockets.sockets.get(previousSocketId)?.disconnect(true);
+    if (!room.players.some(candidate => candidate.connected && candidate.id === room.hostId)) room.hostId = player.id;
     ack(callback, { ok: true, code, name: player.name });
-    advanceAfterVotes(room);
+    advanceAfterActions(room);
   });
 
   socket.on("room:leave", callback => {
@@ -310,10 +498,12 @@ io.on("connection", socket => {
     removePlayer(room, player);
     evaluateTeamVictory(room);
     if (room.players.length === 0) {
+      clearRoomTimers(room);
       rooms.delete(room.code);
       return ack(callback, { ok: true });
     }
-    advanceAfterVotes(room);
+    advanceAfterActions(room);
+    scheduleRoomCleanup(room);
     ack(callback, { ok: true });
   });
 
@@ -321,11 +511,11 @@ io.on("connection", socket => {
     const room = findRoomForSocket(socket.id);
     if (!room || room.phase !== "lobby") return ack(callback, { ok: false, error: "Settings can only change in the lobby." });
     if (room.hostId !== findPlayerForSocket(room, socket.id)?.id) return ack(callback, { ok: false, error: "Only the host can change settings." });
-    const maxPlayers = Math.max(3, Math.min(MAX_PLAYERS, Number(payload.maxPlayers) || room.settings.maxPlayers));
+    const maxPlayers = Math.max(3, Math.min(MAX_PLAYERS, Math.floor(Number(payload.maxPlayers) || room.settings.maxPlayers)));
     if (maxPlayers < room.players.length) return ack(callback, { ok: false, error: "Player limit is below the current room size." });
     const shadowEnabled = payload.shadowEnabled === true;
-    const maxImpostors = Math.max(1, maxPlayers - (shadowEnabled ? 2 : 1));
-    const impostors = Math.max(1, Math.min(4, Number(payload.impostors) || room.settings.impostors, maxImpostors));
+    const maxImpostors = maxBalancedImpostors(maxPlayers, shadowEnabled);
+    const impostors = Math.max(1, Math.min(4, Math.floor(Number(payload.impostors) || room.settings.impostors), maxImpostors));
     room.settings = { maxPlayers, impostors, shadowEnabled };
     sendRoom(room);
     ack(callback, { ok: true });
@@ -337,36 +527,37 @@ io.on("connection", socket => {
     if (!room || room.phase !== "lobby") return ack(callback, { ok: false, error: "The room is not in the lobby." });
     if (room.hostId !== host?.id) return ack(callback, { ok: false, error: "Only the host can start the match." });
     const connectedPlayers = connectedActivePlayers(room);
-    const players = activePlayers(room);
     if (connectedPlayers.length < 3) return ack(callback, { ok: false, error: "At least 3 connected players are required." });
-    if (room.settings.impostors >= players.length - (room.settings.shadowEnabled ? 1 : 0)) {
-      return ack(callback, { ok: false, error: "There must be at least one non-Impostor who can set the word." });
+    if (room.players.some(player => !player.connected)) {
+      return ack(callback, { ok: false, error: "Remove offline lobby players before starting so every role belongs to an active player." });
+    }
+    const players = connectedPlayers;
+    const actualMaxImpostors = maxBalancedImpostors(players.length, room.settings.shadowEnabled);
+    if (room.settings.impostors > actualMaxImpostors) {
+      return ack(callback, { ok: false, error: `With ${players.length} connected players, use no more than ${actualMaxImpostors} Impostor(s) to keep the match winnable.` });
     }
 
-    room.roles = {};
     for (const player of players) player.ready = false;
-    const shuffled = shuffle(players);
-    const shadow = room.settings.shadowEnabled ? random(shuffled) : null;
-    if (shadow) room.roles[shadow.id] = "shadow";
-    const protectedInnocent = random(connectedPlayers.filter(player => player.id !== shadow?.id));
-    const impostorCandidates = shuffle(players.filter(player =>
-      player.id !== shadow?.id && player.id !== protectedInnocent.id
-    ));
-    for (const player of impostorCandidates.slice(0, room.settings.impostors)) {
-      room.roles[player.id] = "impostor";
+    let assignment;
+    try {
+      assignment = assignRoles(
+        players,
+        room.settings.impostors,
+        room.settings.shadowEnabled,
+        () => crypto.randomInt(0, 1_000_000) / 1_000_000
+      );
+    } catch (error) {
+      return ack(callback, { ok: false, error: error.message || "The role setup is invalid." });
     }
-    for (const player of players) {
-      if (!room.roles[player.id]) room.roles[player.id] = "innocent";
-    }
+    room.roles = assignment.roles;
+
     room.word = null;
-    room.wordSetterId = null;
+    room.wordSetterId = assignment.wordSetterId;
     room.round = 1;
     room.clues = [];
     room.votes = [];
     room.winner = null;
     room.lastVoteResults = null;
-    const wordSetters = connectedPlayers.filter(player => room.roles[player.id] !== "impostor");
-    room.wordSetterId = random(wordSetters).id;
     room.phase = "word-entry";
     sendRoom(room);
     ack(callback, { ok: true });
@@ -376,7 +567,9 @@ io.on("connection", socket => {
     const room = findRoomForSocket(socket.id);
     const player = room && findPlayerForSocket(room, socket.id);
     if (!room || room.phase !== "word-entry") return ack(callback, { ok: false, error: "Word selection is closed." });
-    if (room.wordSetterId !== player?.id) return ack(callback, { ok: false, error: "Only the selected word setter can submit the word." });
+    if (room.wordSetterId !== player?.id || !canSetWord(room.roles[player.id])) {
+      return ack(callback, { ok: false, error: "Only the selected Innocent can submit the word." });
+    }
     const word = String(payload.word || "").trim().replace(/\s+/g, " ").slice(0, 40);
     if (word.length < 2) return ack(callback, { ok: false, error: "Word must have at least 2 characters." });
     room.word = word.toUpperCase();
@@ -392,9 +585,10 @@ io.on("connection", socket => {
     if (!room || room.phase !== "word-entry" || room.hostId !== host?.id) {
       return ack(callback, { ok: false, error: "Only the host can reselect the setter during word entry." });
     }
-    if (!reselectDisconnectedWordSetter(room)) {
+    if (findPlayer(room, room.wordSetterId)?.connected) {
       return ack(callback, { ok: false, error: "The selected word setter is still connected." });
     }
+    if (!selectWordSetter(room)) return ack(callback, { ok: false, error: "No connected Innocent is available to set the word." });
     sendRoom(room);
     ack(callback, { ok: true });
   });
@@ -405,16 +599,19 @@ io.on("connection", socket => {
     if (!room || room.phase !== "ready") return ack(callback, { ok: false, error: "The ready phase is closed." });
     if (!player || player.eliminated) return ack(callback, { ok: false, error: "You are not active in this match." });
     player.ready = payload.ready !== false;
-    advanceAfterVotes(room);
+    advanceAfterActions(room);
     ack(callback, { ok: true });
   });
 
   socket.on("clue:draft", (payload = {}, callback) => {
+    if (!rateLimit(socket, "clue-draft", 30, 5_000)) {
+      return ack(callback, { ok: false, error: "You are typing too quickly. Wait a moment and try again." });
+    }
     const room = findRoomForSocket(socket.id);
     const player = room && findPlayerForSocket(room, socket.id);
     if (!room || room.phase !== "clues") return ack(callback, { ok: false, error: "Clue submission is closed." });
-    if (!player || player.eliminated || player.clueSubmitted) return ack(callback, { ok: false, error: "Your clue is already locked." });
-    player.clueDraft = String(payload.text || "").trim().slice(0, 120);
+    if (!player || player.eliminated || player.clueSubmitted) return ack(callback, { ok: false, error: "Your clue is locked." });
+    player.clueDraft = String(payload.text ?? "").slice(0, 120);
     ack(callback, { ok: true });
   });
 
@@ -431,7 +628,19 @@ io.on("connection", socket => {
     room.clues = room.clues.filter(clue => clue.playerId !== player.id);
     room.clues.push({ playerId: player.id, text });
     room.lastVoteResults = null;
-    advanceAfterVotes(room);
+    advanceAfterActions(room);
+    ack(callback, { ok: true });
+  });
+
+  socket.on("clue:unsubmit", callback => {
+    const room = findRoomForSocket(socket.id);
+    const player = room && findPlayerForSocket(room, socket.id);
+    if (!room || room.phase !== "clues") return ack(callback, { ok: false, error: "Clue editing is closed." });
+    if (!player || player.eliminated) return ack(callback, { ok: false, error: "You are not active in this match." });
+    if (!player.clueSubmitted) return ack(callback, { ok: false, error: "Your clue is not submitted." });
+    player.clueSubmitted = false;
+    room.clues = room.clues.filter(clue => clue.playerId !== player.id);
+    sendRoom(room);
     ack(callback, { ok: true });
   });
 
@@ -442,11 +651,22 @@ io.on("connection", socket => {
     if (!player || player.eliminated) return ack(callback, { ok: false, error: "You are not active in this match." });
     if (room.votes.some(vote => vote.voterId === player.id)) return ack(callback, { ok: false, error: "Your vote is already locked." });
     const target = findPlayer(room, String(payload.targetId || ""));
-    if (!target || target.eliminated || target.id === player.id) {
-      return ack(callback, { ok: false, error: "Choose another active player." });
+    if (!target || !target.connected || target.eliminated || target.id === player.id) {
+      return ack(callback, { ok: false, error: "Choose another connected, active player." });
     }
-    room.votes.push({ voterId: player.id, targetId: target.id });
-    advanceAfterVotes(room);
+    room.votes.push({ voterId: player.id, targetId: target.id, skipped: false });
+    advanceAfterActions(room);
+    ack(callback, { ok: true });
+  });
+
+  socket.on("vote:skip", callback => {
+    const room = findRoomForSocket(socket.id);
+    const player = room && findPlayerForSocket(room, socket.id);
+    if (!room || room.phase !== "voting") return ack(callback, { ok: false, error: "Voting has not opened yet." });
+    if (!player || player.eliminated) return ack(callback, { ok: false, error: "You are not active in this match." });
+    if (room.votes.some(vote => vote.voterId === player.id)) return ack(callback, { ok: false, error: "Your vote is already locked." });
+    room.votes.push({ voterId: player.id, targetId: null, skipped: true });
+    advanceAfterActions(room);
     ack(callback, { ok: true });
   });
 
@@ -458,8 +678,8 @@ io.on("connection", socket => {
     if (!target || target.connected) return ack(callback, { ok: false, error: "Only offline players can be removed." });
     removePlayer(room, target);
     evaluateTeamVictory(room);
-    if (!room.winner) reselectDisconnectedWordSetter(room);
-    advanceAfterVotes(room);
+    if (!room.winner && room.phase === "word-entry" && !findPlayer(room, room.wordSetterId)?.connected) selectWordSetter(room);
+    advanceAfterActions(room);
     ack(callback, { ok: true });
   });
 
@@ -484,11 +704,13 @@ io.on("connection", socket => {
     room.winner = null;
     room.lastVoteResults = null;
     room.phase = "lobby";
+    room.waitingPhase = null;
     sendRoom(room);
     ack(callback, { ok: true });
   });
 
   socket.on("chat:send", (payload = {}, callback) => {
+    if (!rateLimit(socket, "chat", 8, 5000)) return ack(callback, { ok: false, error: "Slow down a little before sending another message." });
     const room = findRoomForSocket(socket.id);
     const player = room && findPlayerForSocket(room, socket.id);
     const text = String(payload.text || "").trim().slice(0, 300);
@@ -507,6 +729,7 @@ io.on("connection", socket => {
   });
 
   socket.on("voice:state", (payload = {}) => {
+    if (!rateLimit(socket, "voice-state", 20, 5_000)) return;
     const room = findRoomForSocket(socket.id);
     const player = room && findPlayerForSocket(room, socket.id);
     if (!player) return;
@@ -515,6 +738,7 @@ io.on("connection", socket => {
   });
 
   socket.on("voice:signal", (payload = {}) => {
+    if (!rateLimit(socket, "voice-signal", 500, 10_000)) return;
     const room = findRoomForSocket(socket.id);
     const sender = room && findPlayerForSocket(room, socket.id);
     const target = room?.players.find(player => player.socketId === payload.targetSocketId && player.connected);
@@ -531,9 +755,14 @@ io.on("connection", socket => {
     if (room.hostId === player.id && room.players.some(candidate => candidate.connected)) {
       room.hostId = room.players.find(candidate => candidate.connected).id;
     }
-    reselectDisconnectedWordSetter(room);
-    advanceAfterVotes(room);
+    if (room.phase === "word-entry" && room.wordSetterId === player.id) selectWordSetter(room);
+    advanceAfterActions(room);
+    scheduleRoomCleanup(room);
   });
 });
 
-server.listen(PORT, "0.0.0.0", () => console.log(`MINDTRAP server listening on port ${PORT}`));
+if (require.main === module) {
+  server.listen(PORT, "0.0.0.0", () => console.log(`MINDTRAP server listening on port ${PORT}`));
+}
+
+module.exports = { app, server, io, rooms, PHASE_DURATIONS, personalOutcome };
