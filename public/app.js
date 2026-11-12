@@ -1,4 +1,5 @@
-const socket = io();
+const socket = window.MindtrapSocket || io({ autoConnect: false });
+window.MindtrapSocket = socket;
 const $ = id => document.getElementById(id);
 const STORAGE_KEY = "mindtrap-session";
 const MUTED_KEY = "mindtrap-muted-players";
@@ -192,6 +193,7 @@ $("leave-room").onclick = async () => {
   micEnabled = false;
   room = null;
   privateInfo = null;
+  window.MindtrapWorld?.setRoom(null);
   lastGameResultKey = "";
   gameResultDismissed = false;
   shownVoteResults.clear();
@@ -663,6 +665,10 @@ socket.on("room:update", data => {
     gameResultDismissed = false;
   }
   renderRoom();
+  window.MindtrapWorld?.setRoom(data);
+});
+window.addEventListener("mindtrap:world-ready", () => {
+  if (room) window.MindtrapWorld?.setRoom(room);
 });
 socket.on("game:private", data => {
   privateInfo = data;
@@ -688,6 +694,7 @@ socket.on("connect", async () => {
     clearSession();
     room = null;
     privateInfo = null;
+    window.MindtrapWorld?.setRoom(null);
     $("room-screen").classList.add("hidden");
     $("home-screen").classList.remove("hidden");
     toast("Your saved room is no longer available. Create or join a room.");
@@ -901,3 +908,4 @@ function updatePhaseTimer() {
 }
 setInterval(updatePhaseTimer, 1000);
 updateMicButton();
+socket.connect();

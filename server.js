@@ -6,6 +6,8 @@ const { Server } = require("socket.io");
 const path = require("path");
 const crypto = require("crypto");
 const { countVotes, groupVoteCounts, maxBalancedImpostors, assignRoles, canSetWord, personalOutcome } = require("./lib/game-logic");
+const { spawnPosition, clampWorldPosition } = require("./lib/world-logic");
+const database = require("./lib/database");
 
 const PORT = Number(process.env.PORT) || 3000;
 const MAX_PLAYERS = 15;
@@ -58,7 +60,15 @@ app.get("/runtime-config.js", (_request, response) => {
   response.set("Cache-Control", "no-store");
   response.type("application/javascript").send(`window.MINDTRAP_CONFIG = ${JSON.stringify({ iceServers })};`);
 });
-app.get("/health", (_request, response) => response.json({ ok: true, service: "mindtrap" }));
+app.get("/health", async (_request, response) => {
+  try {
+    const db = await database.healthCheck();
+    response.json({ ok: true, service: "mindtrap", database: db.enabled ? "connected" : "disabled" });
+  } catch (error) {
+    console.error("Health check failed.", error);
+    response.status(503).json({ ok: false, service: "mindtrap", database: "unavailable" });
+  }
+});
 app.use(express.static(path.join(__dirname, "public")));
 
 const random = items => items[crypto.randomInt(items.length)];
@@ -126,6 +136,7 @@ function publicRoom(room) {
       connected: player.connected,
       eliminated: player.eliminated,
       voiceEnabled: player.connected && player.voiceEnabled,
+      position: player.position,
       ready: room.phase === "ready" && player.ready,
       hasSubmittedClue: room.phase === "clues" && player.clueSubmitted
     })),
@@ -227,6 +238,7 @@ function schedulePhaseTimeout(room) {
 function sendRoom(room) {
   if (!rooms.has(room.code)) return;
   schedulePhaseTimeout(room);
+  void database.saveRoom(room);
   io.to(room.code).emit("room:update", publicRoom(room));
   sendPrivateState(room);
 }
@@ -373,6 +385,8 @@ function makePlayer(name, socket, token) {
     connected: true,
     eliminated: false,
     voiceEnabled: false,
+    position: null,
+    lastWorldMoveAt: 0,
     ready: false,
     clueDraft: "",
     clueSubmitted: false
@@ -397,6 +411,7 @@ function scheduleRoomCleanup(room) {
     if (!room.players.some(player => player.connected)) {
       clearRoomTimers(room);
       rooms.delete(room.code);
+      void database.deleteRoom(room.code);
     }
   }, ROOM_IDLE_TTL);
   room.cleanupTimer.unref?.();
@@ -413,6 +428,7 @@ io.on("connection", socket => {
     const impostors = Math.max(1, Math.min(4, Math.floor(Number(payload.impostors) || 1), maxImpostors));
     const token = crypto.randomBytes(32).toString("hex");
     const player = makePlayer(payload.name, socket, token);
+    player.position = spawnPosition(0, maxPlayers);
     let code = roomCode();
     while (rooms.has(code)) code = roomCode();
     const room = {
@@ -454,6 +470,7 @@ io.on("connection", socket => {
     if (room.players.length >= room.settings.maxPlayers) return ack(callback, { ok: false, error: "Room is full. Ask the host to remove an offline player." });
     const token = crypto.randomBytes(32).toString("hex");
     const player = makePlayer(payload.name, socket, token);
+    player.position = spawnPosition(room.players.length, room.settings.maxPlayers);
     room.players.push(player);
     socket.join(code);
     if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
@@ -500,6 +517,7 @@ io.on("connection", socket => {
     if (room.players.length === 0) {
       clearRoomTimers(room);
       rooms.delete(room.code);
+      void database.deleteRoom(room.code);
       return ack(callback, { ok: true });
     }
     advanceAfterActions(room);
@@ -709,6 +727,34 @@ io.on("connection", socket => {
     ack(callback, { ok: true });
   });
 
+  socket.on("world:move", (payload = {}) => {
+    if (!rateLimit(socket, "world-move", 20, 1_000)) return;
+    const room = findRoomForSocket(socket.id);
+    const player = room && findPlayerForSocket(room, socket.id);
+    if (!room || !player) return;
+
+    const now = Date.now();
+    const elapsedSeconds = player.lastWorldMoveAt
+      ? (now - player.lastWorldMoveAt) / 1_000
+      : 0.25;
+    const position = clampWorldPosition(player.position, payload, elapsedSeconds);
+    if (!position) return;
+
+    player.position = position;
+    player.lastWorldMoveAt = now;
+    if (!room.lastWorldPersistAt || now - room.lastWorldPersistAt >= 5_000) {
+      room.lastWorldPersistAt = now;
+      void database.saveRoom(room);
+    }
+    io.to(room.code).emit("world:player-moved", {
+      playerId: player.id,
+      name: player.name,
+      position,
+      connected: true,
+      voiceEnabled: player.voiceEnabled
+    });
+  });
+
   socket.on("chat:send", (payload = {}, callback) => {
     if (!rateLimit(socket, "chat", 8, 5000)) return ack(callback, { ok: false, error: "Slow down a little before sending another message." });
     const room = findRoomForSocket(socket.id);
@@ -724,6 +770,7 @@ io.on("connection", socket => {
     };
     room.chatHistory.push(message);
     room.chatHistory = room.chatHistory.slice(-50);
+    void database.saveRoom(room);
     io.to(room.code).emit("chat:message", message);
     ack(callback, { ok: true });
   });
@@ -761,8 +808,70 @@ io.on("connection", socket => {
   });
 });
 
-if (require.main === module) {
-  server.listen(PORT, "0.0.0.0", () => console.log(`MINDTRAP server listening on port ${PORT}`));
+function restoreRoom(snapshot) {
+  if (!snapshot || typeof snapshot.code !== "string" || !Array.isArray(snapshot.players)) return null;
+  const players = snapshot.players.map(player => ({
+    ...player,
+    tokenHash: Buffer.from(String(player.tokenHash || ""), "hex"),
+    socketId: null,
+    connected: false,
+    voiceEnabled: false,
+    lastWorldMoveAt: 0
+  })).filter(player => player.tokenHash.length === 32);
+  return {
+    ...snapshot,
+    players,
+    phaseTimer: null,
+    phaseTimerPhase: null,
+    phaseDeadline: null,
+    cleanupTimer: null,
+    lastWorldPersistAt: 0
+  };
 }
 
-module.exports = { app, server, io, rooms, PHASE_DURATIONS, personalOutcome };
+async function startServer() {
+  const savedRooms = await database.initializeDatabase();
+  for (const snapshot of savedRooms) {
+    const room = restoreRoom(snapshot);
+    if (!room || !room.players.length) {
+      if (snapshot?.code) void database.deleteRoom(snapshot.code);
+      continue;
+    }
+    rooms.set(room.code, room);
+    scheduleRoomCleanup(room);
+  }
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`MINDTRAP server listening on port ${PORT}`);
+    console.log(`Restored ${rooms.size} room(s) from persistent storage.`);
+  });
+}
+
+if (require.main === module) {
+  startServer().catch(error => {
+    console.error("MINDTRAP could not initialize its database or server.", error);
+    process.exitCode = 1;
+  });
+
+  let isShuttingDown = false;
+  const shutdown = signal => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`MINDTRAP received ${signal}; closing cleanly.`);
+    const forceExit = setTimeout(() => process.exit(1), 12_000);
+    forceExit.unref?.();
+    server.close(async () => {
+      try {
+        await database.closeDatabase();
+        clearTimeout(forceExit);
+        process.exit(0);
+      } catch (error) {
+        console.error("MINDTRAP shutdown cleanup failed.", error);
+        process.exit(1);
+      }
+    });
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+}
+
+module.exports = { app, server, io, rooms, PHASE_DURATIONS, personalOutcome, startServer, restoreRoom };

@@ -404,3 +404,73 @@ textarea { min-height: 100px; resize: vertical; line-height: 1.6; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+
+/* First-person 3D multiplayer station */
+.world-panel { overflow: hidden; margin: 0 0 17px; border-color: rgba(107, 153, 205, .26); background: #080d1b; }
+.world-stage {
+  position: relative; height: clamp(390px, 52vw, 620px); min-height: 350px; overflow: hidden;
+  isolation: isolate; background:
+    radial-gradient(ellipse at 48% 55%, rgba(60, 93, 151, .3), transparent 52%),
+    linear-gradient(145deg, #0d1830, #080d1b 70%);
+}
+#world-canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: none; cursor: crosshair; }
+.world-vignette {
+  position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(4, 8, 18, .58), transparent 20%, transparent 66%, rgba(4, 8, 18, .8));
+  box-shadow: inset 0 0 90px rgba(0, 0, 0, .28);
+}
+.world-topline, .world-bottomline {
+  position: absolute; z-index: 2; left: 20px; right: 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  pointer-events: none;
+}
+.world-topline { top: 18px; }
+.world-brand-chip, .world-phase-chip {
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 11px; border: 1px solid rgba(165, 191, 230, .23);
+  border-radius: 8px; background: rgba(8, 14, 28, .7); backdrop-filter: blur(12px); color: #e6efff;
+  font-size: 9px; font-weight: 850; letter-spacing: .14em;
+}
+.world-phase-chip { color: var(--cyan); }
+.world-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 13px var(--green); }
+.world-bottomline { bottom: 18px; align-items: end; }
+.world-crew-count { display: grid; gap: 2px; padding: 9px 12px; border-radius: 9px; background: rgba(8, 14, 28, .72); border: 1px solid rgba(165, 191, 230, .18); backdrop-filter: blur(12px); }
+.world-crew-count strong { font-size: 11px; letter-spacing: .1em; color: #f3f6ff; }
+.world-crew-count span, .world-control-note { color: #a4b3ce; font-size: 8px; font-weight: 800; letter-spacing: .13em; }
+.world-control-note { text-align: center; padding: 8px 11px; border-radius: 8px; background: rgba(8, 14, 28, .58); }
+.world-control-note span { margin: 0 5px; color: var(--cyan); }
+.world-enter { min-width: 188px; min-height: 43px; pointer-events: auto; border-radius: 9px; font-size: 10px; letter-spacing: .1em; }
+.world-enter.is-playing { border-color: rgba(95, 225, 210, .45); background: rgba(10, 35, 47, .9); color: var(--cyan); box-shadow: none; }
+.world-center-reticle {
+  position: absolute; z-index: 1; top: 50%; left: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%);
+  pointer-events: none; opacity: .68;
+}
+.world-center-reticle i, .world-center-reticle b { position: absolute; display: block; border-radius: 2px; background: rgba(222, 244, 255, .88); }
+.world-center-reticle i { width: 2px; height: 18px; top: 2px; left: 10px; }
+.world-center-reticle b { height: 2px; width: 18px; top: 10px; left: 2px; }
+.world-statusbar { display: flex; align-items: center; gap: 9px; min-height: 37px; padding: 8px 14px; border-top: 1px solid rgba(165, 191, 230, .12); background: rgba(12, 19, 36, .95); }
+.world-status-icon { color: var(--cyan); font-size: 13px; }
+#world-status { color: #98a9c6; font-size: 9px; font-weight: 800; letter-spacing: .12em; }
+.world-status-right { margin-left: auto; color: #586987; font-size: 8px; font-weight: 800; letter-spacing: .12em; }
+.world-touch-pad { display: none; position: absolute; z-index: 3; left: 15px; bottom: 72px; gap: 5px; flex-direction: column; align-items: center; pointer-events: auto; }
+.world-touch-pad > div { display: flex; gap: 5px; }
+.world-touch-pad button {
+  width: 39px; height: 39px; border: 1px solid rgba(154, 193, 239, .28); border-radius: 10px;
+  background: rgba(8, 14, 28, .65); color: #dbe8ff; font-size: 12px; touch-action: none; user-select: none;
+}
+.world-touch-pad button.is-pressed { background: rgba(95, 225, 210, .25); border-color: var(--cyan); }
+@media (max-width: 760px) {
+  .world-stage { height: 58vh; min-height: 360px; max-height: 510px; }
+  .world-topline, .world-bottomline { left: 12px; right: 12px; }
+  .world-bottomline { bottom: 12px; flex-wrap: wrap; align-items: center; }
+  .world-control-note { display: none; }
+  .world-enter { min-width: 160px; }
+  .world-touch-pad { display: flex; }
+  .world-status-right { display: none; }
+}
+@media (max-width: 430px) {
+  .world-stage { min-height: 330px; }
+  .world-bottomline { gap: 7px; }
+  .world-crew-count { padding: 7px 9px; }
+  .world-enter { min-width: 148px; min-height: 39px; padding: 7px 10px; font-size: 9px; }
+  .world-brand-chip, .world-phase-chip { padding: 7px 9px; font-size: 8px; }
+}

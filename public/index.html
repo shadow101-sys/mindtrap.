@@ -64,6 +64,32 @@
         </div>
       </div>
 
+      <section id="world-panel" class="world-panel panel" aria-label="MINDTRAP first-person multiplayer world">
+        <div class="world-stage">
+          <canvas id="world-canvas" aria-label="3D first-person game world" tabindex="0"></canvas>
+          <div class="world-vignette" aria-hidden="true"></div>
+          <div class="world-topline">
+            <div class="world-brand-chip"><span class="world-live-dot"></span> SPATIAL SESSION</div>
+            <div id="world-phase" class="world-phase-chip">LOBBY</div>
+          </div>
+          <div class="world-center-reticle" aria-hidden="true"><i></i><b></b></div>
+          <div class="world-bottomline">
+            <div class="world-crew-count"><strong id="world-player-count">1 / 8 CREW</strong><span>LIVE IN THIS STATION</span></div>
+            <div class="world-control-note">WASD MOVE <span>·</span> MOUSE LOOK <span>·</span> SHIFT SPRINT <span>·</span> ESC RELEASE</div>
+            <button id="world-enter" class="button button-primary world-enter" type="button">ENTER FIRST PERSON <span aria-hidden="true">↗</span></button>
+          </div>
+          <div id="world-touch-pad" class="world-touch-pad" aria-label="Touch movement controls">
+            <button type="button" data-move="w" aria-label="Move forward">▲</button>
+            <div><button type="button" data-move="a" aria-label="Move left">◀</button><button type="button" data-move="s" aria-label="Move backward">▼</button><button type="button" data-move="d" aria-label="Move right">▶</button></div>
+          </div>
+        </div>
+        <div class="world-statusbar">
+          <span class="world-status-icon" aria-hidden="true">✦</span>
+          <span id="world-status">CLICK ENTER FIRST PERSON TO WALK AROUND</span>
+          <span class="world-status-right">MINDTRAP / SPATIAL BUILD 01</span>
+        </div>
+      </section>
+
       <section id="voice-toolbar" class="voice-toolbar panel">
         <div class="voice-heading">
           <span class="voice-icon-shell" aria-hidden="true">
@@ -262,9 +288,11 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script>window.MindtrapSocket = window.io({ autoConnect: false });</script>
   <script src="/runtime-config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js" defer></script>
-  <script type="module" src="cuby.js"></script>
   <script type="module" src="app.js"></script>
+  <script type="module" src="cuby.js"></script>
+  <script type="module" src="world.js"></script>
 </body>
 </html>
